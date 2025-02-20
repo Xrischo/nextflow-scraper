@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scraper Config CSV Editor</title>
+    <style>
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-top: 10px;
+        }
+
+        th,
+        td {
+            border: 1px solid black;
+            padding: 8px;
+            text-align: left;
+        }
+
+        th {
+            background-color: #f2f2f2;
+        }
+
+        .delete-btn {
+            cursor: pointer;
+            color: red;
+            font-weight: bold;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- TITLE -->
+    <h2>Scraper Config CSV Editor</h2>
+
+    <!-- UPLOAD CSV -->
+    <label>Choose CSV File: </label>
+    <input type="file" id="csvFileInput" accept=".csv">
+
+    <p>*Scraper CSV File definition is: table_name, url, fetch_method, headers, selectors</p>
+
+    <!-- ADD NEW SRC FIELDS -->
+    <h3>Add New Source</h3>
+    <form onsubmit="addRow(event)">
+        <label for="name">Name:</label>
+        <input type="text" id="name" required>
+        <label for="url">Website URL:</label>
+        <input type="text" id="url" required>
+        <label for="method">Method:</label>
+        <select type="text" id="method" required>
+            <option value="GET">GET</option>
+            <option value="POST">POST</option>
+        </select>
+        <label for="headers">Headers:</label>
+        <input type="text" id="headers" required>
+        <!-- <label for="selectors">CSS Selectors:</label>
+        <input type="text" id="selectors" required> -->
+        <!-- add selectors after a source is added -->
+        <button type="submit">Add</button>
+    </form>
+
+    <!-- TABLE WITH ALL SOURCES -->
+    <h3>Sources</h3>
+    <table id="csvTable">
+        <thead>
+            <tr>
+                <th>Output Table</th>
+                <th>URL</th>
+                <th>Method</th>
+                <th>Headers</th>
+                <th>Selectors</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+
+    <!-- DOWNLOAD SOURCES -->
+    <button class="download-btn" onclick="downloadCSV()">Download CSV</button>
+
+    <p>*Note: If you are editing the column names of an existing table, run the pipeline with --overwrite true. This will overwrite the existing table, otherwise chances are that it will throw an error.</p>
+
+    <script>
+        let data = [];
+        const selectorsIndex = 4
+
+        document.getElementById("csvFileInput").addEventListener("change", function (event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                const text = e.target.result;
+                data = parseCSV(text);
+                renderTable();
+            };
+            reader.readAsText(file);
+        });
+
+        function parseCSV(csvText) {
+            const rows = csvText.trim().split("\n").slice(1);
+            // get each cell for each row
+            return rows.map(row => {
+                const cells = row.split(",").map(cell => cell.replace(/"/g, "").trim());
+                return [cells[0], cells[1], cells[2], cells[3], parseSelectors(cells[selectorsIndex])];
+            });
+        }
+
+        // each selector is of the form <name>:<selector>, separated by ';'
+        // extract the name and selector into an object
+        function parseSelectors(selectorsText) {
+            let selectors = {};
+
+            if (selectorsText) {
+                selectorsText.split(";").forEach(pair => {
+                    const index = pair.indexOf(":"); // find first occurrence of ':'
+                    if (index !== -1) {
+                        const key = pair.substring(0, index).trim();
+                        const value = pair.substring(index + 1).trim();
+                        selectors[key] = value;
+                    }
+                });
+            }
+            return selectors;
+        }
+
+        function renderTable() {
+            const tbody = document.querySelector("#csvTable tbody");
+            tbody.innerHTML = "";
+            data.forEach((row, index) => {
+                const tr = document.createElement("tr");
+
+                row.forEach((cell, cellIndex) => {
+                    // selectors are a list of input pairs, so they need to be implemented separately
+                    if (cellIndex == selectorsIndex) {
+                        const selectorsTd = document.createElement("td");
+                        const selectorsDiv = document.createElement("div");
+                        for (let key in row[selectorsIndex]) {
+                            addSelectorField(selectorsDiv, index, key, row[selectorsIndex][key]);
+                        }
+                        const addSelectorBtn = document.createElement("button");
+                        addSelectorBtn.textContent = "Add Selector";
+                        addSelectorBtn.onclick = () => addSelectorField(selectorsDiv, index);
+                        selectorsTd.appendChild(selectorsDiv);
+                        selectorsTd.appendChild(addSelectorBtn);
+                        tr.appendChild(selectorsTd);
+                    } else { // for simplicity, everything else is an input field
+                        const td = document.createElement("td");
+                        const input = document.createElement("input");
+                        input.type = "text";
+                        input.value = cell;
+                        input.oninput = (e) => data[index][cellIndex] = e.target.value;
+                        td.appendChild(input);
+                        tr.appendChild(td);
+                    }
+                });
+
+                const deleteTd = document.createElement("td");
+                const deleteBtn = document.createElement("span");
+                deleteBtn.textContent = "❌";
+                deleteBtn.className = "delete-btn";
+                deleteBtn.onclick = () => { data.splice(index, 1); renderTable(); };
+                deleteTd.appendChild(deleteBtn);
+                tr.appendChild(deleteTd);
+                tbody.appendChild(tr);
+            });
+        }
+
+        function addSelectorField(container, index, key = "", value = "") {
+            const wrapper = document.createElement("div");
+            const keyInput = document.createElement("input");
+            const oldKeyInput = document.createElement("input"); // hidden variable to store the old key
+            oldKeyInput.style.display = "none";
+            oldKeyInput.type = "text";
+            oldKeyInput.value = key;
+            keyInput.type = "text";
+            keyInput.placeholder = "Name";
+            keyInput.value = key;
+            const valueInput = document.createElement("input");
+            valueInput.type = "text";
+            valueInput.placeholder = "Selector Info";
+            valueInput.value = value;
+
+            keyInput.oninput = () => updateSelectors(index, wrapper, oldKeyInput, keyInput, valueInput);
+            valueInput.oninput = () => updateSelectors(index, wrapper, oldKeyInput, keyInput, valueInput);
+
+            const removeBtn = document.createElement("span");
+            removeBtn.textContent = "❌";
+            removeBtn.className = "delete-btn";
+            removeBtn.onclick = () => {
+                container.removeChild(wrapper);
+                delete data[index][1][keyInput.value];
+            };
+
+            wrapper.appendChild(keyInput);
+            wrapper.appendChild(oldKeyInput);
+            wrapper.appendChild(valueInput);
+            wrapper.appendChild(removeBtn);
+            container.appendChild(wrapper);
+        }
+
+        function updateSelectors(index, wrapper, previousKey, newKey, valueInput) {
+            if ((previousKey.value || newKey.value) && valueInput.value) {
+                delete data[index][selectorsIndex][previousKey.value];
+                data[index][selectorsIndex][newKey.value] = valueInput.value;
+                previousKey.value = newKey.value
+                console.log(data)
+            }
+        }
+
+        function addRow(event) {
+            event.preventDefault();
+            const name = document.getElementById("name").value.trim()
+            const url = document.getElementById("url").value.trim()
+            const method = document.getElementById("method").value.trim()
+            const headers = document.getElementById("headers").value.trim()
+            if (name && url && method && headers) {
+                data.push([name, url, method, headers, '']);
+                renderTable();
+                document.getElementById("name").value = "";
+                document.getElementById("url").value = "";
+                document.getElementById("method").value = "";
+                document.getElementById("headers").value = "";
+            }
+            // don't add selectors here because the code becomes very cumbersome
+        }
+
+        function downloadCSV() {
+            // !Note: hard-coded column names
+            let csvContent = "data:text/csv;charset=utf-8,name,url,method,headers,selectors,output_table\n" + 
+                data.map((row, i) => {
+                    const beforeSelectors = row.slice(0, selectorsIndex);
+                    const afterSelectors = row.length > selectorsIndex ? row.slice(selectorsIndex + 1) : [];
+                    const selectors = Object.entries(row[selectorsIndex]).map(([key, val]) => `${key}:${val}`).join(";");
+                    return afterSelectors.length ? 
+                    `"${beforeSelectors.join('","')}",${selectors},"${afterSelectors.join('","')}"` : 
+                    `"${beforeSelectors.join('","')}",${selectors}`;
+                }).join("\n");
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "updated_selectors.csv");
+            document.body.appendChild(link);
+            link.click();
+        }
+    </script>
+</body>
+
+</html>
